@@ -1,0 +1,79 @@
+{
+  "uid": "tunnelforge",
+  "title": "TunnelForge VPN Gateway",
+  "tags": ["tunnelforge"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "title": "Active Sessions", "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "tunnelforge_active_sessions", "legendFormat": "sessions" }],
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }] } } }
+    },
+    {
+      "id": 2, "title": "Auth Failures", "type": "stat",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "tunnelforge_auth_failures_total", "legendFormat": "failures" }],
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } }
+    },
+    {
+      "id": 3, "title": "Policy Denials", "type": "stat",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "tunnelforge_policy_denials_total", "legendFormat": "denials" }],
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }] } } }
+    },
+    {
+      "id": 4, "title": "Anomalies Detected", "type": "stat",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "expr": "tunnelforge_anomalies_detected_total", "legendFormat": "anomalies" }],
+      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] } } }
+    },
+    {
+      "id": 5, "title": "Auth Rate", "type": "timeseries",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rate(tunnelforge_auth_attempts_total[1m])", "legendFormat": "attempts/s" },
+        { "expr": "rate(tunnelforge_auth_failures_total[1m])", "legendFormat": "failures/s" }
+      ]
+    },
+    {
+      "id": 6, "title": "Policy Denials by Reason", "type": "timeseries",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rate(tunnelforge_policy_denials_total[1m])", "legendFormat": "{{reason}}" }
+      ]
+    },
+    {
+      "id": 7, "title": "Request Duration Percentiles", "type": "timeseries",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "histogram_quantile(0.99, rate(tunnelforge_request_duration_seconds_bucket[1m]))", "legendFormat": "p99" },
+        { "expr": "histogram_quantile(0.95, rate(tunnelforge_request_duration_seconds_bucket[1m]))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.50, rate(tunnelforge_request_duration_seconds_bucket[1m]))", "legendFormat": "p50" }
+      ]
+    },
+    {
+      "id": 8, "title": "Auth Attempts by Role", "type": "timeseries",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "rate(tunnelforge_auth_attempts_total[1m])", "legendFormat": "{{role}}" }
+      ]
+    }
+  ]
+}
