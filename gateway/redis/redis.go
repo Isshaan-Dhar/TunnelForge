@@ -11,6 +11,15 @@ type Store struct {
 	client *redisclient.Client
 }
 
+var rateLimitScript = redisclient.NewScript(`
+	local current
+	current = redis.call("incr", KEYS[1])
+	if current == 1 then
+		redis.call("expire", KEYS[1], ARGV[1])
+	end
+	return current
+`)
+
 func New(addr string) (*Store, error) {
 	client := redisclient.NewClient(&redisclient.Options{
 		Addr: addr,
@@ -38,12 +47,5 @@ func (s *Store) IsTokenBlacklisted(ctx context.Context, tokenID string) (bool, e
 }
 
 func (s *Store) IncrementRateLimit(ctx context.Context, key string, window time.Duration) (int64, error) {
-	count, err := s.client.Incr(ctx, key).Result()
-	if err != nil {
-		return 0, err
-	}
-	if count == 1 {
-		s.client.Expire(ctx, key, window)
-	}
-	return count, nil
+	return rateLimitScript.Run(ctx, s.client, []string{key}, int(window.Seconds())).Int64()
 }
