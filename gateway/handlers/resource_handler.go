@@ -41,6 +41,7 @@ func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	cleanPath := path.Clean(r.URL.Path)
 	r.URL.Path = cleanPath
+	r.URL.RawPath = ""
 
 	p, err := h.db.GetPolicyByRole(r.Context(), claims.Role)
 	if err != nil {
