@@ -42,7 +42,7 @@ def fetch_audit_window(conn) -> list[dict]:
             """
             SELECT username, action, resource, client_ip, status, occurred_at
             FROM audit_log
-            WHERE occurred_at >= NOW() - INTERVAL '%s seconds'
+            WHERE occurred_at >= NOW() - INTERVAL '1 second' * %s
             ORDER BY occurred_at ASC
             """,
             (ANALYSIS_WINDOW,)
