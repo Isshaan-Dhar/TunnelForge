@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/isshaan-dhar/TunnelForge/auth"
@@ -32,9 +32,10 @@ func NewResourceHandler(upstream string, store *db.Store) (*ResourceHandler, err
 
 func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r)
-	clientIP := r.Header.Get("X-Real-IP")
-	if clientIP == "" {
-		clientIP = strings.Split(r.RemoteAddr, ":")[0]
+
+	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		clientIP = r.RemoteAddr
 	}
 
 	p, err := h.db.GetPolicyByRole(r.Context(), claims.Role)
