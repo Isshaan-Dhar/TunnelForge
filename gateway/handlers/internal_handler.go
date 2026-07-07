@@ -28,6 +28,7 @@ func (h *InternalHandler) RecordAnomaly(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 
 	var n anomalyNotification
 	if err := json.NewDecoder(r.Body).Decode(&n); err != nil {
