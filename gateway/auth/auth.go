@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -40,7 +42,12 @@ func (m *Manager) VerifyPassword(hash, password string) error {
 }
 
 func (m *Manager) GenerateToken(userID, username, role string) (string, string, time.Time, error) {
-	tokenID := fmt.Sprintf("%s:%s:%d", userID, username, time.Now().UnixNano())
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", time.Time{}, err
+	}
+	
+	tokenID := fmt.Sprintf("%s:%s:%s", userID, username, hex.EncodeToString(b))
 	expiresAt := time.Now().Add(24 * time.Hour)
 	claims := Claims{
 		UserID:   userID,
