@@ -40,19 +40,29 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		clientIP = r.RemoteAddr
 	}
 
-	rateKey := "rate_limit:login:" + clientIP
-	count, err := h.redis.IncrementRateLimit(r.Context(), rateKey, 5*time.Minute)
-	if err == nil && count > 10 {
-		metrics.AuthFailures.Inc()
-		h.db.WriteAuditLog(context.Background(), "", "", "LOGIN", "", clientIP, "DENIED", "rate limit exceeded")
-		http.Error(w, "Too many requests", http.StatusTooManyRequests)
-		return
-	}
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	
+
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Password) > 72 {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	rateKeyIP := "rate_limit:login:ip:" + clientIP
+	countIP, errIP := h.redis.IncrementRateLimit(r.Context(), rateKeyIP, 5*time.Minute)
+
+	rateKeyUser := "rate_limit:login:user:" + req.Username
+	countUser, errUser := h.redis.IncrementRateLimit(r.Context(), rateKeyUser, 5*time.Minute)
+
+	if (errIP == nil && countIP > 10) || (errUser == nil && countUser > 10) {
+		metrics.AuthFailures.Inc()
+		h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "DENIED", "rate limit exceeded")
+		http.Error(w, "Too many requests", http.StatusTooManyRequests)
 		return
 	}
 
@@ -85,12 +95,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := h.db.CreateSession(ctx, user.ID, tokenID, clientIP, expiresAt); err != nil {
-		metrics.AuthFailures.Inc()
-		h.db.WriteAuditLog(context.Background(), user.ID, user.Username, "LOGIN", "", clientIP, "FAILURE", "failed to initialize session state")
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	
 	h.db.UpdateLastLogin(ctx, user.ID)
 	
 	metrics.AuthAttempts.WithLabelValues(user.Role, "success").Inc()
@@ -116,7 +123,10 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 	ttl := time.Until(claims.ExpiresAt.Time)
 	if ttl > 0 {
-		h.redis.BlacklistToken(context.Background(), claims.TokenID, ttl)
+		if err := h.redis.BlacklistToken(context.Background(), claims.TokenID, ttl); err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
 	}
 	
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
