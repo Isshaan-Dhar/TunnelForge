@@ -52,7 +52,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		
 		metrics.AuthFailures.Inc()
 		metrics.AuthAttempts.WithLabelValues("unknown", "failure").Inc()
-		go h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "FAILURE", "user not found or inactive")
+		h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "FAILURE", "user not found or inactive")
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -60,7 +60,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if err := h.auth.VerifyPassword(user.PasswordHash, req.Password); err != nil {
 		metrics.AuthFailures.Inc()
 		metrics.AuthAttempts.WithLabelValues(user.Role, "failure").Inc()
-		go h.db.WriteAuditLog(context.Background(), user.ID, user.Username, "LOGIN", "", clientIP, "FAILURE", "invalid password")
+		h.db.WriteAuditLog(context.Background(), user.ID, user.Username, "LOGIN", "", clientIP, "FAILURE", "invalid password")
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
@@ -71,11 +71,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go h.db.CreateSession(context.Background(), user.ID, tokenID, clientIP, expiresAt)
-	go h.db.UpdateLastLogin(context.Background(), user.ID)
+	h.db.CreateSession(context.Background(), user.ID, tokenID, clientIP, expiresAt)
+	h.db.UpdateLastLogin(context.Background(), user.ID)
 	metrics.AuthAttempts.WithLabelValues(user.Role, "success").Inc()
 	metrics.ActiveSessions.Inc()
-	go h.db.WriteAuditLog(context.Background(), user.ID, user.Username, "LOGIN", "", clientIP, "SUCCESS", "")
+	h.db.WriteAuditLog(context.Background(), user.ID, user.Username, "LOGIN", "", clientIP, "SUCCESS", "")
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -95,10 +95,10 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ttl := time.Until(claims.ExpiresAt.Time)
-	go h.redis.BlacklistToken(context.Background(), claims.TokenID, ttl)
-	go h.db.RevokeSession(context.Background(), claims.TokenID)
+	h.redis.BlacklistToken(context.Background(), claims.TokenID, ttl)
+	h.db.RevokeSession(context.Background(), claims.TokenID)
 	metrics.ActiveSessions.Dec()
-	go h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username, "LOGOUT", "", clientIP, "SUCCESS", "")
+	h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username, "LOGOUT", "", clientIP, "SUCCESS", "")
 
 	w.WriteHeader(http.StatusNoContent)
 }
