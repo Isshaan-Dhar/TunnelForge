@@ -28,6 +28,7 @@ DB_CONFIG = {
 }
 
 GATEWAY_URL = "http://gateway:8443/internal/anomaly"
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "super-secret-sidecar-key")
 ANALYSIS_WINDOW = 300
 MIN_EVENTS = 3
 
@@ -93,6 +94,7 @@ def notify_gateway(alert: AnomalyAlert):
         requests.post(
             GATEWAY_URL,
             json={"anomaly_type": alert.anomaly_type, "severity": alert.severity},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=2,
         )
     except Exception:
