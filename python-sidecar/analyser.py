@@ -115,13 +115,13 @@ def write_alert(conn, alert: AnomalyAlert):
 
 def run_analysis():
     log.info("Running session analysis cycle")
+    conn = None
     try:
         conn = get_connection()
         events = fetch_audit_window(conn)
 
         if not events:
             log.info("No audit log entries in analysis window")
-            conn.close()
             return
 
         log.info(f"Analysing {len(events)} audit events across {ANALYSIS_WINDOW}s window")
@@ -129,7 +129,6 @@ def run_analysis():
         feature_map = build_features(events)
         if len(feature_map) < 2:
             log.info("Insufficient users for anomaly detection")
-            conn.close()
             return
 
         usernames = list(feature_map.keys())
@@ -170,10 +169,11 @@ def run_analysis():
                 write_alert(conn, alert)
                 notify_gateway(alert)
 
-        conn.close()
-
     except Exception as e:
         log.error(f"Analysis cycle failed: {e}")
+    finally:
+        if conn:
+            conn.close()
 
 
 def main():
