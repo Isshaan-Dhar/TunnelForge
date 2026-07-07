@@ -58,6 +58,10 @@ func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Header.Del("Authorization")
+	r.Header.Set("X-TunnelForge-User", claims.Username)
+	r.Header.Set("X-TunnelForge-Role", claims.Role)
+
 	h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username,
 		"ACCESS", cleanPath, clientIP, "ALLOWED", "")
 	h.proxy.ServeHTTP(w, r)
