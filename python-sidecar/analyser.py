@@ -31,6 +31,7 @@ GATEWAY_URL = "http://gateway:8443/internal/anomaly"
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "super-secret-sidecar-key")
 ANALYSIS_WINDOW = 300
 MIN_EVENTS = 3
+MIN_USERS = 3
 
 
 def get_connection():
@@ -128,39 +129,61 @@ def run_analysis():
         log.info(f"Analysing {len(events)} audit events across {ANALYSIS_WINDOW}s window")
 
         feature_map = build_features(events)
-        if len(feature_map) < 2:
-            log.info("Insufficient users for anomaly detection")
-            return
-
-        usernames = list(feature_map.keys())
-        X = np.array([feature_map[u] for u in usernames])
-
-        clf = IsolationForest(contamination=0.1, random_state=42)
-        preds = clf.fit_predict(X)
-
         alerts = []
-        for i, username in enumerate(usernames):
-            if preds[i] == -1:
-                feats = feature_map[username]
+
+        if len(feature_map) < MIN_USERS:
+            log.info(f"Low traffic period ({len(feature_map)}/{MIN_USERS} users). Falling back to static threshold rules.")
+            for username, feats in feature_map.items():
+                event_rate = feats[0]
                 failure_rate = feats[1]
-                severity = "CRITICAL" if failure_rate > 0.5 else "HIGH"
-                anomaly_type = "CREDENTIAL_STUFFING" if failure_rate > 0.5 else "SESSION_ANOMALY"
-                alert = AnomalyAlert(
-                    anomaly_type=anomaly_type,
-                    severity=severity,
-                    username=username,
-                    detail=f"Isolation Forest anomaly: event_rate={feats[0]:.3f} failure_rate={feats[1]:.3f} denial_rate={feats[2]:.3f}",
-                    evidence={
-                        "event_rate": feats[0],
-                        "failure_rate": feats[1],
-                        "denial_rate": feats[2],
-                        "resource_diversity": feats[3],
-                        "distinct_ips": feats[4],
-                        "login_rate": feats[5],
-                        "hour": feats[6],
-                    }
-                )
-                alerts.append(alert)
+                total_events = event_rate * ANALYSIS_WINDOW
+                
+                if total_events >= MIN_EVENTS and failure_rate >= 0.5:
+                    alert = AnomalyAlert(
+                        anomaly_type="CREDENTIAL_STUFFING",
+                        severity="CRITICAL",
+                        username=username,
+                        detail=f"Static threshold triggered: failure_rate={failure_rate:.3f}",
+                        evidence={
+                            "event_rate": event_rate,
+                            "failure_rate": failure_rate,
+                            "denial_rate": feats[2],
+                            "resource_diversity": feats[3],
+                            "distinct_ips": feats[4],
+                            "login_rate": feats[5],
+                            "hour": feats[6],
+                        }
+                    )
+                    alerts.append(alert)
+        else:
+            usernames = list(feature_map.keys())
+            X = np.array([feature_map[u] for u in usernames])
+
+            clf = IsolationForest(contamination=0.1, random_state=42)
+            preds = clf.fit_predict(X)
+
+            for i, username in enumerate(usernames):
+                if preds[i] == -1:
+                    feats = feature_map[username]
+                    failure_rate = feats[1]
+                    severity = "CRITICAL" if failure_rate > 0.5 else "HIGH"
+                    anomaly_type = "CREDENTIAL_STUFFING" if failure_rate > 0.5 else "SESSION_ANOMALY"
+                    alert = AnomalyAlert(
+                        anomaly_type=anomaly_type,
+                        severity=severity,
+                        username=username,
+                        detail=f"Isolation Forest anomaly: event_rate={feats[0]:.3f} failure_rate={feats[1]:.3f} denial_rate={feats[2]:.3f}",
+                        evidence={
+                            "event_rate": feats[0],
+                            "failure_rate": feats[1],
+                            "denial_rate": feats[2],
+                            "resource_diversity": feats[3],
+                            "distinct_ips": feats[4],
+                            "login_rate": feats[5],
+                            "hour": feats[6],
+                        }
+                    )
+                    alerts.append(alert)
 
         if not alerts:
             log.info("No anomalies detected")
