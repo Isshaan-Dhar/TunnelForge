@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path"
 	"time"
 
 	"github.com/isshaan-dhar/TunnelForge/auth"
@@ -38,22 +39,25 @@ func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		clientIP = r.RemoteAddr
 	}
 
+	cleanPath := path.Clean(r.URL.Path)
+	r.URL.Path = cleanPath
+
 	p, err := h.db.GetPolicyByRole(r.Context(), claims.Role)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	result := policy.Evaluate(p, r.URL.Path, time.Now())
+	result := policy.Evaluate(p, cleanPath, time.Now())
 	if !result.Allowed {
 		metrics.PolicyDenials.WithLabelValues(string(result.Reason)).Inc()
-		go h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username,
-			"ACCESS", r.URL.Path, clientIP, "DENIED", string(result.Reason))
+		h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username,
+			"ACCESS", cleanPath, clientIP, "DENIED", string(result.Reason))
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
-	go h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username,
-		"ACCESS", r.URL.Path, clientIP, "ALLOWED", "")
+	h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username,
+		"ACCESS", cleanPath, clientIP, "ALLOWED", "")
 	h.proxy.ServeHTTP(w, r)
 }
