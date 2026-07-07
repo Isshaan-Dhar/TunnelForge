@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/isshaan-dhar/TunnelForge/metrics"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -76,10 +77,12 @@ func New(dsn string) (*Store, error) {
 
 func (s *Store) Close() {
 	close(s.auditQueue)
+	s.wg.Wait()
 	s.pool.Close()
 }
 
 func (s *Store) auditWorker() {
+	defer s.wg.Done()
 	
 	for event := range s.auditQueue {
 		_, err := s.pool.Exec(context.Background(),
@@ -157,7 +160,8 @@ func (s *Store) WriteAuditLog(ctx context.Context, userID, username, action, res
 	}:
 		return nil
 	default:
-		log.Println("audit queue full, dropping log event to preserve gateway performance")
+		metrics.AuditQueueDrops.Inc()
+		log.Println("CRITICAL: audit queue full, dropping log event to preserve gateway performance")
 		return nil
 	}
 }
