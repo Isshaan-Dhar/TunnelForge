@@ -4,18 +4,18 @@ import (
 	"context"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	redisclient "github.com/redis/go-redis/v9"
 )
 
 type Store struct {
-	client *redis.Client
+	client *redisclient.Client
 }
 
 func New(addr string) (*Store, error) {
-	client := redis.NewClient(&redis.Options{Addr: addr})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
+	client := redisclient.NewClient(&redisclient.Options{
+		Addr: addr,
+	})
+	if err := client.Ping(context.Background()).Err(); err != nil {
 		return nil, err
 	}
 	return &Store{client: client}, nil
@@ -30,27 +30,20 @@ func (s *Store) BlacklistToken(ctx context.Context, tokenID string, ttl time.Dur
 }
 
 func (s *Store) IsTokenBlacklisted(ctx context.Context, tokenID string) (bool, error) {
-	n, err := s.client.Exists(ctx, "blacklist:"+tokenID).Result()
+	exists, err := s.client.Exists(ctx, "blacklist:"+tokenID).Result()
 	if err != nil {
 		return false, err
 	}
-	return n > 0, nil
+	return exists > 0, nil
 }
 
-func (s *Store) IncrementAuthAttempt(ctx context.Context, ip string, window time.Duration) (int64, error) {
-	key := "ratelimit:auth:" + ip
-	
-	pipe := s.client.Pipeline()
-	incr := pipe.Incr(ctx, key)
-	pipe.Expire(ctx, key, window)
-	
-	_, err := pipe.Exec(ctx)
+func (s *Store) IncrementRateLimit(ctx context.Context, key string, window time.Duration) (int64, error) {
+	count, err := s.client.Incr(ctx, key).Result()
 	if err != nil {
 		return 0, err
 	}
-	return incr.Val(), nil
-}
-
-func (s *Store) ClearAuthAttempts(ctx context.Context, ip string) error {
-	return s.client.Del(ctx, "ratelimit:auth:"+ip).Err()
+	if count == 1 {
+		s.client.Expire(ctx, key, window)
+	}
+	return count, nil
 }
