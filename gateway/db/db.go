@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -22,6 +23,7 @@ type AuditEvent struct {
 type Store struct {
 	pool       *pgxpool.Pool
 	auditQueue chan AuditEvent
+	wg         sync.WaitGroup
 }
 
 type User struct {
@@ -64,9 +66,10 @@ func New(dsn string) (*Store, error) {
 	
 	s := &Store{
 		pool:       pool,
-		auditQueue: make(chan AuditEvent, 5000),
+		auditQueue: make(chan AuditEvent, 5000), 
 	}
 	
+	s.wg.Add(1)
 	go s.auditWorker()
 	return s, nil
 }
@@ -77,6 +80,7 @@ func (s *Store) Close() {
 }
 
 func (s *Store) auditWorker() {
+	
 	for event := range s.auditQueue {
 		_, err := s.pool.Exec(context.Background(),
 			`INSERT INTO audit_log (user_id, username, action, resource, client_ip, status, detail)
