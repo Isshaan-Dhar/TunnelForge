@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 
@@ -21,7 +22,9 @@ type anomalyNotification struct {
 }
 
 func (h *InternalHandler) RecordAnomaly(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("X-Internal-Secret") != h.secret {
+	headerSecret := r.Header.Get("X-Internal-Secret")
+	
+	if subtle.ConstantTimeCompare([]byte(headerSecret), []byte(h.secret)) != 1 {
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
