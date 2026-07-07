@@ -47,7 +47,6 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
-		// FIXED: Hardened internal metrics server against resource exhaustion
 		metricsSrv := &http.Server{
 			Addr:              ":" + cfg.MetricsPort,
 			Handler:           mux,
@@ -64,9 +63,11 @@ func main() {
 
 	go func() {
 		for {
-			if count, err := store.CountActiveSessions(context.Background()); err == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if count, err := store.CountActiveSessions(ctx); err == nil {
 				metrics.ActiveSessions.Set(float64(count))
 			}
+			cancel()
 			time.Sleep(15 * time.Second)
 		}
 	}()
@@ -103,7 +104,7 @@ func main() {
 		r.Get("/session/me", sessionHandler.Me)
 		r.Mount("/", resourceHandler)
 	})
-	
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.AppPort,
 		Handler:           r,
