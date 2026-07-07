@@ -1,141 +1,50 @@
-package handlers
+package redis
 
 import (
 	"context"
-	"encoding/json"
-	"net"
-	"net/http"
 	"time"
 
-	"github.com/isshaan-dhar/TunnelForge/auth"
-	"github.com/isshaan-dhar/TunnelForge/db"
-	"github.com/isshaan-dhar/TunnelForge/metrics"
-	redisstore "github.com/isshaan-dhar/TunnelForge/redis"
+	redisclient "github.com/redis/go-redis/v9"
 )
 
-type AuthHandler struct {
-	db    *db.Store
-	auth  *auth.Manager
-	redis *redisstore.Store
+type Store struct {
+	client *redisclient.Client
 }
 
-func NewAuthHandler(store *db.Store, authMgr *auth.Manager, redis *redisstore.Store) *AuthHandler {
-	return &AuthHandler{db: store, auth: authMgr, redis: redis}
-}
-
-type loginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-type loginResponse struct {
-	Token     string `json:"token"`
-	ExpiresAt string `json:"expires_at"`
-	Role      string `json:"role"`
-}
-
-func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		clientIP = r.RemoteAddr
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-
-	var req loginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
-
-	if len(req.Password) > 72 {
-		http.Error(w, "invalid request", http.StatusBadRequest)
-		return
-	}
-
-	rateKeyIP := "rate_limit:login:ip:" + clientIP
-	countIP, errIP := h.redis.IncrementRateLimit(r.Context(), rateKeyIP, 5*time.Minute)
-
-	rateKeyUser := "rate_limit:login:user:" + req.Username
-	countUser, errUser := h.redis.IncrementRateLimit(r.Context(), rateKeyUser, 5*time.Minute)
-
-	if (errIP == nil && countIP > 10) || (errUser == nil && countUser > 10) {
-		metrics.AuthFailures.Inc()
-		h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "DENIED", "rate limit exceeded")
-		http.Error(w, "Too many requests", http.StatusTooManyRequests)
-		return
-	}
-
-	user, err := h.db.GetUserByUsername(r.Context(), req.Username)
-	if err != nil || user == nil || !user.IsActive {
-		h.auth.VerifyPassword("$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi", req.Password)
-		
-		metrics.AuthFailures.Inc()
-		metrics.AuthAttempts.WithLabelValues("unknown", "failure").Inc()
-		h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "FAILURE", "user not found or inactive")
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-		return
-	}
-
-	if err := h.auth.VerifyPassword(user.PasswordHash, req.Password); err != nil {
-		metrics.AuthFailures.Inc()
-		metrics.AuthAttempts.WithLabelValues(user.Role, "failure").Inc()
-		h.db.WriteAuditLog(context.Background(), user.ID, user.Username, "LOGIN", "", clientIP, "FAILURE", "invalid password")
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
-		return
-	}
-
-	token, tokenID, expiresAt, err := h.auth.GenerateToken(user.ID, user.Username, user.Role)
-	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := h.db.CreateSession(ctx, user.ID, tokenID, clientIP, expiresAt); err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
-		return
-	}
-	h.db.UpdateLastLogin(ctx, user.ID)
-	
-	metrics.AuthAttempts.WithLabelValues(user.Role, "success").Inc()
-	metrics.ActiveSessions.Inc()
-	h.db.WriteAuditLog(context.Background(), user.ID, user.Username, "LOGIN", "", clientIP, "SUCCESS", "")
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(loginResponse{
-		Token:     token,
-		ExpiresAt: expiresAt.Format(time.RFC3339),
-		Role:      user.Role,
+func New(addr string) (*Store, error) {
+	client := redisclient.NewClient(&redisclient.Options{
+		Addr: addr,
 	})
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		return nil, err
+	}
+	return &Store{client: client}, nil
 }
 
-func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
-	claims := auth.GetClaims(r)
+func (s *Store) Close() error {
+	return s.client.Close()
+}
 
-	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
+func (s *Store) BlacklistToken(ctx context.Context, tokenID string, ttl time.Duration) error {
+	return s.client.Set(ctx, "blacklist:"+tokenID, "1", ttl).Err()
+}
+
+func (s *Store) IsTokenBlacklisted(ctx context.Context, tokenID string) (bool, error) {
+	exists, err := s.client.Exists(ctx, "blacklist:"+tokenID).Result()
 	if err != nil {
-		clientIP = r.RemoteAddr
+		return false, err
 	}
+	return exists > 0, nil
+}
 
-	ttl := time.Until(claims.ExpiresAt.Time)
-	if ttl > 0 {
-		if err := h.redis.BlacklistToken(context.Background(), claims.TokenID, ttl); err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
+func (s *Store) IncrementRateLimit(ctx context.Context, key string, window time.Duration) (int64, error) {
+	pipe := s.client.TxPipeline()
+	incr := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, window)
+
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return 0, err
 	}
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	
-	h.db.RevokeSession(ctx, claims.TokenID)
-	
-	metrics.ActiveSessions.Dec()
-	h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username, "LOGOUT", "", clientIP, "SUCCESS", "")
-
-	w.WriteHeader(http.StatusNoContent)
+	return incr.Val(), nil
 }
