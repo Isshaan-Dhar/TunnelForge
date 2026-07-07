@@ -26,8 +26,15 @@ func Evaluate(p *db.Policy, resource string, now time.Time) Result {
 	}
 
 	hour := now.UTC().Hour()
-	if hour < p.AllowedHoursStart || hour > p.AllowedHoursEnd {
-		return Result{Allowed: false, Reason: DenialOffHours}
+	
+	if p.AllowedHoursStart <= p.AllowedHoursEnd {
+		if hour < p.AllowedHoursStart || hour > p.AllowedHoursEnd {
+			return Result{Allowed: false, Reason: DenialOffHours}
+		}
+	} else {
+		if hour < p.AllowedHoursStart && hour > p.AllowedHoursEnd {
+			return Result{Allowed: false, Reason: DenialOffHours}
+		}
 	}
 
 	if len(p.AllowedResources) > 0 {
