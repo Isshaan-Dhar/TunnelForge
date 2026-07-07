@@ -3,8 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/isshaan-dhar/TunnelForge/auth"
@@ -35,9 +35,9 @@ type loginResponse struct {
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	clientIP := r.Header.Get("X-Real-IP")
-	if clientIP == "" {
-		clientIP = strings.Split(r.RemoteAddr, ":")[0]
+	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		clientIP = r.RemoteAddr
 	}
 
 	var req loginRequest
@@ -48,6 +48,8 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	user, err := h.db.GetUserByUsername(r.Context(), req.Username)
 	if err != nil || user == nil || !user.IsActive {
+		h.auth.VerifyPassword("$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi", req.Password)
+		
 		metrics.AuthFailures.Inc()
 		metrics.AuthAttempts.WithLabelValues("unknown", "failure").Inc()
 		go h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "FAILURE", "user not found or inactive")
@@ -86,9 +88,10 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	claims := auth.GetClaims(r)
-	clientIP := r.Header.Get("X-Real-IP")
-	if clientIP == "" {
-		clientIP = strings.Split(r.RemoteAddr, ":")[0]
+
+	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		clientIP = r.RemoteAddr
 	}
 
 	ttl := time.Until(claims.ExpiresAt.Time)
