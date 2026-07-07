@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 )
 
 func main() {
@@ -25,9 +26,17 @@ func main() {
 	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"resource":"admin","data":"admin panel"}`)
 	})
+	srv := &http.Server{
+		Addr:              ":9000",
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 
 	log.Println("client-sim starting on :9000")
-	if err := http.ListenAndServe(":9000", mux); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
