@@ -63,11 +63,9 @@ func main() {
 
 	go func() {
 		for {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if count, err := store.CountActiveSessions(ctx); err == nil {
+			if count, err := store.CountActiveSessions(context.Background()); err == nil {
 				metrics.ActiveSessions.Set(float64(count))
 			}
-			cancel()
 			time.Sleep(15 * time.Second)
 		}
 	}()
@@ -77,8 +75,15 @@ func main() {
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
+
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			w.Header().Set("X-XSS-Protection", "1; mode=block")
+			w.Header().Set("Content-Security-Policy", "default-src 'self'")
+
 			start := time.Now()
 			ww := chimiddleware.NewWrapResponseWriter(w, req.ProtoMajor)
 			next.ServeHTTP(ww, req)
