@@ -2,14 +2,26 @@ package db
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type AuditEvent struct {
+	UserID   string
+	Username string
+	Action   string
+	Resource string
+	ClientIP string
+	Status   string
+	Detail   string
+}
+
 type Store struct {
-	pool *pgxpool.Pool
+	pool       *pgxpool.Pool
+	auditQueue chan AuditEvent
 }
 
 type User struct {
@@ -49,11 +61,32 @@ func New(dsn string) (*Store, error) {
 	if err := pool.Ping(ctx); err != nil {
 		return nil, err
 	}
-	return &Store{pool: pool}, nil
+	
+	s := &Store{
+		pool:       pool,
+		auditQueue: make(chan AuditEvent, 5000),
+	}
+	
+	go s.auditWorker()
+	return s, nil
 }
 
 func (s *Store) Close() {
+	close(s.auditQueue)
 	s.pool.Close()
+}
+
+func (s *Store) auditWorker() {
+	for event := range s.auditQueue {
+		_, err := s.pool.Exec(context.Background(),
+			`INSERT INTO audit_log (user_id, username, action, resource, client_ip, status, detail)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			nullableUUID(event.UserID), event.Username, event.Action, event.Resource, event.ClientIP, event.Status, event.Detail,
+		)
+		if err != nil {
+			log.Printf("failed to write audit log: %v", err)
+		}
+	}
 }
 
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, error) {
@@ -69,21 +102,6 @@ func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, 
 }
 
 func (s *Store) GetPolicyByRole(ctx context.Context, role string) (*Policy, error) {
-	var p Policy
-	var resources []string
-	err := s.pool.QueryRow(ctx,
-		`SELECT id, name, user_role, allowed_hours_start, allowed_hours_end, require_trusted_device, allowed_resources
-		 FROM policies WHERE user_role = $1 LIMIT 1`,
-		role,
-	).Scan(&p.ID, &p.Name, &p.UserRole, &p.AllowedHoursStart, &p.AllowedHoursEnd, &p.RequireTrustedDevice, &resources)
-	if err == pgx.ErrNoRows {
-		return nil, nil
-	}
-	p.AllowedResources = resources
-	return &p, err
-}
-
-func (s *Store) GetPolicyForRole(ctx context.Context, role string) (*Policy, error) {
 	var p Policy
 	var resources []string
 	err := s.pool.QueryRow(ctx,
@@ -123,12 +141,21 @@ func (s *Store) UpdateLastLogin(ctx context.Context, userID string) error {
 }
 
 func (s *Store) WriteAuditLog(ctx context.Context, userID, username, action, resource, clientIP, status, detail string) error {
-	_, err := s.pool.Exec(ctx,
-		`INSERT INTO audit_log (user_id, username, action, resource, client_ip, status, detail)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		nullableUUID(userID), username, action, resource, clientIP, status, detail,
-	)
-	return err
+	select {
+	case s.auditQueue <- AuditEvent{
+		UserID:   userID,
+		Username: username,
+		Action:   action,
+		Resource: resource,
+		ClientIP: clientIP,
+		Status:   status,
+		Detail:   detail,
+	}:
+		return nil
+	default:
+		log.Println("audit queue full, dropping log event to preserve gateway performance")
+		return nil
+	}
 }
 
 func (s *Store) CountActiveSessions(ctx context.Context) (int64, error) {
