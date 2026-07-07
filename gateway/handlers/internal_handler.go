@@ -7,10 +7,12 @@ import (
 	"github.com/isshaan-dhar/TunnelForge/metrics"
 )
 
-type InternalHandler struct{}
+type InternalHandler struct {
+	secret string
+}
 
-func NewInternalHandler() *InternalHandler {
-	return &InternalHandler{}
+func NewInternalHandler(secret string) *InternalHandler {
+	return &InternalHandler{secret: secret}
 }
 
 type anomalyNotification struct {
@@ -19,6 +21,11 @@ type anomalyNotification struct {
 }
 
 func (h *InternalHandler) RecordAnomaly(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("X-Internal-Secret") != h.secret {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
 	var n anomalyNotification
 	if err := json.NewDecoder(r.Body).Decode(&n); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
