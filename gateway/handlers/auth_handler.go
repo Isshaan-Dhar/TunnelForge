@@ -40,6 +40,16 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		clientIP = r.RemoteAddr
 	}
 
+	// Rate limiting: Block IPs exceeding 10 attempts per 5 minutes at the gateway level
+	rateKey := "rate_limit:login:" + clientIP
+	count, err := h.redis.IncrementRateLimit(r.Context(), rateKey, 5*time.Minute)
+	if err == nil && count > 10 {
+		metrics.AuthFailures.Inc()
+		h.db.WriteAuditLog(context.Background(), "", "", "LOGIN", "", clientIP, "DENIED", "rate limit exceeded")
+		http.Error(w, "Too many requests", http.StatusTooManyRequests)
+		return
+	}
+
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -71,8 +81,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.db.CreateSession(context.Background(), user.ID, tokenID, clientIP, expiresAt)
-	h.db.UpdateLastLogin(context.Background(), user.ID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	h.db.CreateSession(ctx, user.ID, tokenID, clientIP, expiresAt)
+	h.db.UpdateLastLogin(ctx, user.ID)
+	
 	metrics.AuthAttempts.WithLabelValues(user.Role, "success").Inc()
 	metrics.ActiveSessions.Inc()
 	h.db.WriteAuditLog(context.Background(), user.ID, user.Username, "LOGIN", "", clientIP, "SUCCESS", "")
@@ -95,8 +109,15 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ttl := time.Until(claims.ExpiresAt.Time)
-	h.redis.BlacklistToken(context.Background(), claims.TokenID, ttl)
-	h.db.RevokeSession(context.Background(), claims.TokenID)
+	if ttl > 0 {
+		h.redis.BlacklistToken(context.Background(), claims.TokenID, ttl)
+	}
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	
+	h.db.RevokeSession(ctx, claims.TokenID)
+	
 	metrics.ActiveSessions.Dec()
 	h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username, "LOGOUT", "", clientIP, "SUCCESS", "")
 
