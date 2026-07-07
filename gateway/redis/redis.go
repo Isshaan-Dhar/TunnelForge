@@ -36,3 +36,21 @@ func (s *Store) IsTokenBlacklisted(ctx context.Context, tokenID string) (bool, e
 	}
 	return n > 0, nil
 }
+
+func (s *Store) IncrementAuthAttempt(ctx context.Context, ip string, window time.Duration) (int64, error) {
+	key := "ratelimit:auth:" + ip
+	
+	pipe := s.client.Pipeline()
+	incr := pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, window)
+	
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return incr.Val(), nil
+}
+
+func (s *Store) ClearAuthAttempts(ctx context.Context, ip string) error {
+	return s.client.Del(ctx, "ratelimit:auth:"+ip).Err()
+}
