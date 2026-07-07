@@ -37,7 +37,7 @@ func main() {
 	authManager := auth.NewManager(cfg.JWTSecret, redis)
 	authHandler := handlers.NewAuthHandler(store, authManager, redis)
 	sessionHandler := handlers.NewSessionHandler()
-	internalHandler := handlers.NewInternalHandler()
+	internalHandler := handlers.NewInternalHandler(cfg.InternalSecret)
 
 	resourceHandler, err := handlers.NewResourceHandler(cfg.UpstreamURL, store)
 	if err != nil {
@@ -47,8 +47,17 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
+		// FIXED: Hardened internal metrics server against resource exhaustion
+		metricsSrv := &http.Server{
+			Addr:              ":" + cfg.MetricsPort,
+			Handler:           mux,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       10 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
 		log.Printf("Metrics server starting on :%s", cfg.MetricsPort)
-		if err := http.ListenAndServe(":"+cfg.MetricsPort, mux); err != nil {
+		if err := metricsSrv.ListenAndServe(); err != nil {
 			log.Fatalf("metrics server error: %v", err)
 		}
 	}()
@@ -94,9 +103,18 @@ func main() {
 		r.Get("/session/me", sessionHandler.Me)
 		r.Mount("/", resourceHandler)
 	})
+	
+	srv := &http.Server{
+		Addr:              ":" + cfg.AppPort,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	log.Printf("TunnelForge gateway starting on :%s", cfg.AppPort)
-	if err := http.ListenAndServe(":"+cfg.AppPort, r); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
 }
