@@ -16,14 +16,14 @@ type Config struct {
 }
 
 func Load() *Config {
-	jwtSecret := getEnv("JWT_SECRET", "")
+	jwtSecret := os.Getenv("JWT_SECRET")
 	if jwtSecret == "" || jwtSecret == "changeme-32-char-secret-here!!!" {
-		log.Fatal("FATAL: JWT_SECRET must be explicitly set to a secure string in the environment")
+		log.Fatal("FATAL: JWT_SECRET must be explicitly set to a secure string")
 	}
 
-	internalSecret := getEnv("INTERNAL_SECRET", "")
+	internalSecret := os.Getenv("INTERNAL_SECRET")
 	if internalSecret == "" || internalSecret == "super-secret-sidecar-key" {
-		log.Fatal("FATAL: INTERNAL_SECRET must be explicitly set to a secure string in the environment")
+		log.Fatal("FATAL: INTERNAL_SECRET must be explicitly set to a secure string")
 	}
 
 	return &Config{
