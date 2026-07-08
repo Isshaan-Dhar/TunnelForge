@@ -19,8 +19,9 @@ type Config struct {
 
 func Load() *Config {
 	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" || jwtSecret == "changeme-32-char-secret-here!!!" {
-		log.Fatal("FATAL: JWT_SECRET must be explicitly set to a secure string in the environment")
+	// FIXED: HMAC-SHA256 mathematically requires >= 32 bytes for strict cryptographic safety.
+	if len(jwtSecret) < 32 || jwtSecret == "changeme-32-char-secret-here!!!" {
+		log.Fatal("FATAL: JWT_SECRET must be at least 32 characters long and explicitly set")
 	}
 
 	internalSecret := os.Getenv("INTERNAL_SECRET")
@@ -33,7 +34,6 @@ func Load() *Config {
 		log.Fatal("FATAL: POSTGRES_PASSWORD must be explicitly set to a secure string in the environment")
 	}
 
-	// FIXED: Safely escape credentials to prevent parsing panics on special characters
 	pgUser := getEnv("POSTGRES_USER", "tunnelforge")
 	pgHost := getEnv("POSTGRES_HOST", "postgres")
 	pgPort := getEnv("POSTGRES_PORT", "5432")
