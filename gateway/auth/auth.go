@@ -83,12 +83,19 @@ func (m *Manager) ValidateToken(tokenStr string) (*Claims, error) {
 
 func (m *Manager) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
+		tokenStr := ""
+
+		if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
+			tokenStr = strings.TrimPrefix(header, "Bearer ")
+		} else if cookie, err := r.Cookie("jwt"); err == nil {
+			tokenStr = cookie.Value
+		}
+
+		if tokenStr == "" {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		tokenStr := strings.TrimPrefix(header, "Bearer ")
+
 		claims, err := m.ValidateToken(tokenStr)
 		if err != nil {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -103,6 +110,7 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+
 		ctx := context.WithValue(r.Context(), ClaimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
