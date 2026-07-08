@@ -65,12 +65,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_user_id     ON audit_log (user_id,  occ
 CREATE INDEX IF NOT EXISTS idx_audit_log_action      ON audit_log (action,   occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_log_occurred_at ON audit_log (occurred_at DESC);
 
-INSERT INTO users (username, password_hash, role) VALUES
-    ('admin', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin'),
-    ('alice', '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'user'),
-    ('bob',   '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'user')
-ON CONFLICT (username) DO NOTHING;
-
 INSERT INTO policies (name, user_role, allowed_hours_start, allowed_hours_end, require_trusted_device, allowed_resources) VALUES
     ('admin-policy',    'admin', 0, 23, FALSE, ARRAY['/admin', '/api', '/metrics']),
     ('user-policy',     'user',  0, 23, FALSE, ARRAY['/api']),
