@@ -34,7 +34,6 @@ type bootstrapRequest struct {
 	Role     string `json:"role"`
 }
 
-// FIXED: Protect against length timing attacks by comparing SHA256 hashes instead of raw lengths
 func secureCompare(given, actual string) bool {
 	hash1 := sha256.Sum256([]byte(given))
 	hash2 := sha256.Sum256([]byte(actual))
@@ -42,6 +41,11 @@ func secureCompare(given, actual string) bool {
 }
 
 func (h *InternalHandler) RecordAnomaly(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "Unsupported Media Type", http.StatusUnsupportedMediaType)
+		return
+	}
+
 	headerSecret := r.Header.Get("X-Internal-Secret")
 
 	if !secureCompare(headerSecret, h.secret) {
@@ -61,6 +65,11 @@ func (h *InternalHandler) RecordAnomaly(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *InternalHandler) BootstrapAdmin(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "Unsupported Media Type", http.StatusUnsupportedMediaType)
+		return
+	}
+
 	headerSecret := r.Header.Get("X-Internal-Secret")
 
 	if !secureCompare(headerSecret, h.secret) {
