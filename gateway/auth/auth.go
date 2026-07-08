@@ -46,7 +46,7 @@ func (m *Manager) GenerateToken(userID, username, role string) (string, string, 
 	if _, err := rand.Read(b); err != nil {
 		return "", "", time.Time{}, err
 	}
-	
+
 	tokenID := fmt.Sprintf("%s:%s:%s", userID, username, hex.EncodeToString(b))
 	expiresAt := time.Now().Add(24 * time.Hour)
 	claims := Claims{
@@ -94,7 +94,11 @@ func (m *Manager) Middleware(next http.Handler) http.Handler {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		blacklisted, err := m.redis.IsTokenBlacklisted(r.Context(), claims.TokenID)
+
+		redisCtx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		defer cancel()
+
+		blacklisted, err := m.redis.IsTokenBlacklisted(redisCtx, claims.TokenID)
 		if err != nil || blacklisted {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
