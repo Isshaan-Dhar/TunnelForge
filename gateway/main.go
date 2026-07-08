@@ -4,7 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -56,7 +59,7 @@ func main() {
 			IdleTimeout:       60 * time.Second,
 		}
 		log.Printf("Metrics server starting on :%s", cfg.MetricsPort)
-		if err := metricsSrv.ListenAndServe(); err != nil {
+		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("metrics server error: %v", err)
 		}
 	}()
@@ -75,15 +78,8 @@ func main() {
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
-
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			w.Header().Set("X-Content-Type-Options", "nosniff")
-			w.Header().Set("X-Frame-Options", "DENY")
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-			w.Header().Set("X-XSS-Protection", "1; mode=block")
-			w.Header().Set("Content-Security-Policy", "default-src 'self'")
-
 			start := time.Now()
 			ww := chimiddleware.NewWrapResponseWriter(w, req.ProtoMajor)
 			next.ServeHTTP(ww, req)
@@ -119,8 +115,24 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	log.Printf("TunnelForge gateway starting on :%s", cfg.AppPort)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("server error: %v", err)
+	go func() {
+		log.Printf("TunnelForge gateway starting on :%s", cfg.AppPort)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Initiating graceful shutdown...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
 	}
+
+	log.Println("Server exiting successfully")
 }
