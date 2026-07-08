@@ -17,7 +17,6 @@ type sessionResponse struct {
 	UserID   string `json:"user_id"`
 	Username string `json:"username"`
 	Role     string `json:"role"`
-	TokenID  string `json:"token_id"`
 	Valid    bool   `json:"valid"`
 }
 
@@ -28,7 +27,6 @@ func (h *SessionHandler) Me(w http.ResponseWriter, r *http.Request) {
 		UserID:   claims.UserID,
 		Username: claims.Username,
 		Role:     claims.Role,
-		TokenID:  claims.TokenID,
 		Valid:    true,
 	})
 }
