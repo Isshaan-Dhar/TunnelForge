@@ -39,23 +39,33 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		clientIP = r.RemoteAddr
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
+
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
-	rateKey := "rate_limit:login:" + clientIP + ":" + req.Username
 	redisCtx, redisCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer redisCancel()
 
-	count, err := h.redis.IncrementRateLimit(redisCtx, rateKey, 5*time.Minute)
-	if err != nil {
+	// FIXED: Isolate rate limiting buckets to prevent bypasses
+	ipKey := "rate_limit:ip:" + clientIP
+	userKey := "rate_limit:user:" + req.Username
+
+	countIP, errIP := h.redis.IncrementRateLimit(redisCtx, ipKey, 5*time.Minute)
+	countUser, errUser := h.redis.IncrementRateLimit(redisCtx, userKey, 5*time.Minute)
+
+	if errIP != nil || errUser != nil {
 		metrics.AuthFailures.Inc()
 		h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "ERROR", "rate limiter unreachable")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
-	} else if count > 10 {
+	}
+
+	// 50 attempts per IP (stuffs), 10 attempts per User (brutes)
+	if countIP > 50 || countUser > 10 {
 		metrics.AuthFailures.Inc()
 		h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "DENIED", "rate limit exceeded")
 		http.Error(w, "Too many requests", http.StatusTooManyRequests)
@@ -138,10 +148,12 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	metrics.ActiveSessions.Dec()
 	h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username, "LOGOUT", "", clientIP, "SUCCESS", "")
 
+	// FIXED: Explicitly set MaxAge to -1 to force reliable client eviction
 	http.SetCookie(w, &http.Cookie{
 		Name:     "jwt",
 		Value:    "",
 		Expires:  time.Unix(0, 0),
+		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
