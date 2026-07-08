@@ -36,7 +36,8 @@ services:
     image: redis:7-alpine
     container_name: tunnelforge_redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    # FIXED: Added strict maxmemory and LRU eviction to prevent rate-limit key flooding DoS
+    command: redis-server --appendonly yes --maxmemory 100mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     networks:
