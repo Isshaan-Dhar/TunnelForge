@@ -29,7 +29,6 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	Token     string `json:"token"`
 	ExpiresAt string `json:"expires_at"`
 	Role      string `json:"role"`
 }
@@ -51,7 +50,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	defer redisCancel()
 
 	count, err := h.redis.IncrementRateLimit(redisCtx, rateKey, 5*time.Minute)
-	if err == nil && count > 10 {
+	if err != nil {
+		metrics.AuthFailures.Inc()
+		h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "ERROR", "rate limiter unreachable")
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	} else if count > 10 {
 		metrics.AuthFailures.Inc()
 		h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "DENIED", "rate limit exceeded")
 		http.Error(w, "Too many requests", http.StatusTooManyRequests)
@@ -93,10 +97,19 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	metrics.ActiveSessions.Inc()
 	h.db.WriteAuditLog(context.Background(), user.ID, user.Username, "LOGIN", "", clientIP, "SUCCESS", "")
 
+	http.SetCookie(w, &http.Cookie{
+		Name:     "jwt",
+		Value:    token,
+		Expires:  expiresAt,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+	})
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(loginResponse{
-		Token:     token,
 		ExpiresAt: expiresAt.Format(time.RFC3339),
 		Role:      user.Role,
 	})
@@ -124,6 +137,16 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 
 	metrics.ActiveSessions.Dec()
 	h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username, "LOGOUT", "", clientIP, "SUCCESS", "")
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "jwt",
+		Value:    "",
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		Path:     "/",
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }
