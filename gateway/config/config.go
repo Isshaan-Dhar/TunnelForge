@@ -2,6 +2,7 @@ package config
 
 import (
 	"log"
+	"net/url"
 	"os"
 )
 
@@ -13,6 +14,7 @@ type Config struct {
 	JWTSecret      string
 	UpstreamURL    string
 	InternalSecret string
+	AllowedOrigin  string
 }
 
 func Load() *Config {
@@ -31,14 +33,23 @@ func Load() *Config {
 		log.Fatal("FATAL: POSTGRES_PASSWORD must be explicitly set to a secure string in the environment")
 	}
 
+	// FIXED: Safely escape credentials to prevent parsing panics on special characters
+	pgUser := getEnv("POSTGRES_USER", "tunnelforge")
+	pgHost := getEnv("POSTGRES_HOST", "postgres")
+	pgPort := getEnv("POSTGRES_PORT", "5432")
+	pgDB := getEnv("POSTGRES_DB", "tunnelforge")
+
+	dsn := "postgres://" + url.QueryEscape(pgUser) + ":" + url.QueryEscape(pgPass) + "@" + pgHost + ":" + pgPort + "/" + url.QueryEscape(pgDB) + "?sslmode=disable&pool_max_conns=50"
+
 	return &Config{
 		AppPort:        getEnv("GATEWAY_PORT", "8443"),
 		MetricsPort:    "9090",
-		PostgresDSN:    "postgres://" + getEnv("POSTGRES_USER", "tunnelforge") + ":" + pgPass + "@" + getEnv("POSTGRES_HOST", "postgres") + ":" + getEnv("POSTGRES_PORT", "5432") + "/" + getEnv("POSTGRES_DB", "tunnelforge") + "?sslmode=disable&pool_max_conns=50",
+		PostgresDSN:    dsn,
 		RedisAddr:      getEnv("REDIS_ADDR", "redis:6379"),
 		JWTSecret:      jwtSecret,
 		UpstreamURL:    getEnv("UPSTREAM_URL", "http://client-sim:9000"),
 		InternalSecret: internalSecret,
+		AllowedOrigin:  getEnv("ALLOWED_ORIGIN", "https://tunnelforge.local"),
 	}
 }
 
