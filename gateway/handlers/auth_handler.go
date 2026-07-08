@@ -34,6 +34,12 @@ type loginResponse struct {
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
+	// FIXED: Enforce strictly structured data to close CSRF/parsing blind-spots
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "Unsupported Media Type", http.StatusUnsupportedMediaType)
+		return
+	}
+
 	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		clientIP = r.RemoteAddr
@@ -50,7 +56,6 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	redisCtx, redisCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer redisCancel()
 
-	// FIXED: Isolate rate limiting buckets to prevent bypasses
 	ipKey := "rate_limit:ip:" + clientIP
 	userKey := "rate_limit:user:" + req.Username
 
@@ -64,7 +69,6 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 50 attempts per IP (stuffs), 10 attempts per User (brutes)
 	if countIP > 50 || countUser > 10 {
 		metrics.AuthFailures.Inc()
 		h.db.WriteAuditLog(context.Background(), "", req.Username, "LOGIN", "", clientIP, "DENIED", "rate limit exceeded")
@@ -148,7 +152,6 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	metrics.ActiveSessions.Dec()
 	h.db.WriteAuditLog(context.Background(), claims.UserID, claims.Username, "LOGOUT", "", clientIP, "SUCCESS", "")
 
-	// FIXED: Explicitly set MaxAge to -1 to force reliable client eviction
 	http.SetCookie(w, &http.Cookie{
 		Name:     "jwt",
 		Value:    "",
