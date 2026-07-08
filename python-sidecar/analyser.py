@@ -33,6 +33,8 @@ ANALYSIS_WINDOW = 300
 MIN_EVENTS = 3
 MIN_USERS = 3
 
+http_client = requests.Session()
+
 def get_connection():
     return psycopg2.connect(**DB_CONFIG)
 
@@ -88,7 +90,7 @@ def build_features(events: list[dict]) -> dict[str, list]:
 
 def notify_gateway(alert: AnomalyAlert):
     try:
-        requests.post(
+        http_client.post(
             GATEWAY_URL,
             json={"anomaly_type": alert.anomaly_type, "severity": alert.severity},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
@@ -130,7 +132,7 @@ def run_analysis():
         usernames = list(feature_map.keys())
         X = np.array([feature_map[u] for u in usernames])
 
-        clf = IsolationForest(contamination=0.1, random_state=42)
+        clf = IsolationForest(contamination="auto", random_state=42)
         preds = clf.fit_predict(X)
 
         alerts = []
