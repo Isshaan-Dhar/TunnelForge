@@ -87,11 +87,15 @@ func (s *Store) auditWorker() {
 	for event := range s.auditQueue {
 		var err error
 		for attempts := 0; attempts < 3; attempts++ {
-			_, err = s.pool.Exec(context.Background(),
+			// FIXED: Apply execution timeout so worker cannot deadlock graceful shutdown if DB hangs
+			execCtx, execCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, err = s.pool.Exec(execCtx,
 				`INSERT INTO audit_log (user_id, username, action, resource, client_ip, status, detail)
 				 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 				nullableUUID(event.UserID), event.Username, event.Action, event.Resource, event.ClientIP, event.Status, event.Detail,
 			)
+			execCancel()
+			
 			if err == nil {
 				break
 			}
@@ -101,6 +105,12 @@ func (s *Store) auditWorker() {
 			log.Printf("failed to write audit log after 3 attempts: %v", err)
 		}
 	}
+}
+
+func (s *Store) CountUsers(ctx context.Context) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM users`).Scan(&count)
+	return count, err
 }
 
 func (s *Store) CreateUser(ctx context.Context, username, passwordHash, role string) error {
@@ -152,6 +162,19 @@ func (s *Store) RevokeSession(ctx context.Context, tokenID string) error {
 		tokenID,
 	)
 	return err
+}
+
+func (s *Store) IsSessionActive(ctx context.Context, tokenID string) (bool, error) {
+	var revoked bool
+	var expiresAt time.Time
+	err := s.pool.QueryRow(ctx, `SELECT revoked, expires_at FROM sessions WHERE token_id = $1`, tokenID).Scan(&revoked, &expiresAt)
+	if err != nil {
+		return false, err
+	}
+	if revoked || time.Now().After(expiresAt) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (s *Store) UpdateLastLogin(ctx context.Context, userID string) error {
