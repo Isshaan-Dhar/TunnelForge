@@ -25,8 +25,30 @@ func NewResourceHandler(upstream string, store *db.Store) (*ResourceHandler, err
 	if err != nil {
 		return nil, err
 	}
+
+	// FIXED: Bound reverse proxy connections with strict timeouts and proper host rewrites
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = target.Host
+	}
+
+	proxy.Transport = &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+	}
+
 	return &ResourceHandler{
-		proxy: httputil.NewSingleHostReverseProxy(target),
+		proxy: proxy,
 		db:    store,
 	}, nil
 }
@@ -59,6 +81,9 @@ func (h *ResourceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	r.Header.Del("Authorization")
+	r.Header.Del("X-TunnelForge-User")
+	r.Header.Del("X-TunnelForge-Role")
+
 	r.Header.Set("X-TunnelForge-User", claims.Username)
 	r.Header.Set("X-TunnelForge-Role", claims.Role)
 
