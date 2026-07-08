@@ -64,12 +64,12 @@ func New(dsn string) (*Store, error) {
 	if err := pool.Ping(ctx); err != nil {
 		return nil, err
 	}
-	
+
 	s := &Store{
 		pool:       pool,
-		auditQueue: make(chan AuditEvent, 5000), 
+		auditQueue: make(chan AuditEvent, 5000),
 	}
-	
+
 	s.wg.Add(1)
 	go s.auditWorker()
 	return s, nil
@@ -83,7 +83,7 @@ func (s *Store) Close() {
 
 func (s *Store) auditWorker() {
 	defer s.wg.Done()
-	
+
 	for event := range s.auditQueue {
 		var err error
 		for attempts := 0; attempts < 3; attempts++ {
@@ -101,6 +101,14 @@ func (s *Store) auditWorker() {
 			log.Printf("failed to write audit log after 3 attempts: %v", err)
 		}
 	}
+}
+
+func (s *Store) CreateUser(ctx context.Context, username, passwordHash, role string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO users (username, password_hash, role, is_active) VALUES ($1, $2, $3, TRUE) ON CONFLICT (username) DO NOTHING`,
+		username, passwordHash, role,
+	)
+	return err
 }
 
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (*User, error) {
@@ -168,7 +176,7 @@ func (s *Store) WriteAuditLog(ctx context.Context, userID, username, action, res
 		return nil
 	default:
 		metrics.AuditQueueDrops.Inc()
-		log.Println("CRITICAL: audit queue full, dropping log event to preserve gateway performance")
+		log.Println("CRITICAL: audit queue full, dropping log event")
 		return nil
 	}
 }
