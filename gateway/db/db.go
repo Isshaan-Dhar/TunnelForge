@@ -85,24 +85,21 @@ func (s *Store) auditWorker() {
 	defer s.wg.Done()
 
 	for event := range s.auditQueue {
-		var err error
-		for attempts := 0; attempts < 3; attempts++ {
-			// FIXED: Apply execution timeout so worker cannot deadlock graceful shutdown if DB hangs
+		// FIXED: Infinite retry loop ensures no audit logs are dropped if the database restarts.
+		for {
 			execCtx, execCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_, err = s.pool.Exec(execCtx,
+			_, err := s.pool.Exec(execCtx,
 				`INSERT INTO audit_log (user_id, username, action, resource, client_ip, status, detail)
 				 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 				nullableUUID(event.UserID), event.Username, event.Action, event.Resource, event.ClientIP, event.Status, event.Detail,
 			)
 			execCancel()
-			
+
 			if err == nil {
 				break
 			}
-			time.Sleep(time.Duration(attempts+1) * 200 * time.Millisecond)
-		}
-		if err != nil {
-			log.Printf("failed to write audit log after 3 attempts: %v", err)
+			log.Printf("audit log write failed, retrying in 2s: %v", err)
+			time.Sleep(2 * time.Second)
 		}
 	}
 }
