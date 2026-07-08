@@ -48,7 +48,7 @@ func (m *Manager) GenerateToken(userID, username, role string) (string, string, 
 	}
 
 	tokenID := fmt.Sprintf("%s:%s:%s", userID, username, hex.EncodeToString(b))
-	expiresAt := time.Now().Add(24 * time.Hour)
+	expiresAt := time.Now().Add(15 * time.Minute)
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
