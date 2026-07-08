@@ -40,12 +40,18 @@ func Evaluate(p *db.Policy, resource string, now time.Time) Result {
 	if len(p.AllowedResources) > 0 {
 		allowed := false
 		for _, res := range p.AllowedResources {
-			if res == "/" {
+			// FIXED: Sanitize trailing slashes from DB definitions to prevent "res+//" logic denial
+			cleanRes := res
+			if len(cleanRes) > 1 {
+				cleanRes = strings.TrimSuffix(cleanRes, "/")
+			}
+
+			if cleanRes == "/" {
 				allowed = true
 				break
 			}
 			
-			if resource == res || strings.HasPrefix(resource, res+"/") {
+			if resource == cleanRes || strings.HasPrefix(resource, cleanRes+"/") {
 				allowed = true
 				break
 			}
