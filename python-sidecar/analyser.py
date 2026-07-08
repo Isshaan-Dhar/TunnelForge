@@ -33,10 +33,8 @@ ANALYSIS_WINDOW = 300
 MIN_EVENTS = 3
 MIN_USERS = 3
 
-
 def get_connection():
     return psycopg2.connect(**DB_CONFIG)
-
 
 def fetch_audit_window(conn) -> list[dict]:
     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -52,14 +50,12 @@ def fetch_audit_window(conn) -> list[dict]:
         )
         return [dict(r) for r in cur.fetchall()]
 
-
 def ua_entropy(values: list[str]) -> float:
     if not values:
         return 0.0
     unique = set(values)
     total = len(values)
     return -sum((values.count(u) / total) * math.log2(values.count(u) / total) for u in unique)
-
 
 def build_features(events: list[dict]) -> dict[str, list]:
     user_events = defaultdict(list)
@@ -90,7 +86,6 @@ def build_features(events: list[dict]) -> dict[str, list]:
         ]
     return features
 
-
 def notify_gateway(alert: AnomalyAlert):
     try:
         requests.post(
@@ -102,7 +97,6 @@ def notify_gateway(alert: AnomalyAlert):
     except Exception:
         pass
 
-
 def write_alert(conn, alert: AnomalyAlert):
     with conn.cursor() as cur:
         cur.execute(
@@ -113,7 +107,6 @@ def write_alert(conn, alert: AnomalyAlert):
             (alert.username, "ANOMALY_DETECTED", "sidecar", alert.severity, alert.detail)
         )
         conn.commit()
-
 
 def run_analysis():
     log.info("Running session analysis cycle")
@@ -129,61 +122,40 @@ def run_analysis():
         log.info(f"Analysing {len(events)} audit events across {ANALYSIS_WINDOW}s window")
 
         feature_map = build_features(events)
-        alerts = []
-
+        
         if len(feature_map) < MIN_USERS:
-            log.info(f"Low traffic period ({len(feature_map)}/{MIN_USERS} users). Falling back to static threshold rules.")
-            for username, feats in feature_map.items():
-                event_rate = feats[0]
+            log.info(f"Warm-up phase: Insufficient active users ({len(feature_map)}/{MIN_USERS}) for stable anomaly detection.")
+            return
+
+        usernames = list(feature_map.keys())
+        X = np.array([feature_map[u] for u in usernames])
+
+        clf = IsolationForest(contamination=0.1, random_state=42)
+        preds = clf.fit_predict(X)
+
+        alerts = []
+        for i, username in enumerate(usernames):
+            if preds[i] == -1:
+                feats = feature_map[username]
                 failure_rate = feats[1]
-                total_events = event_rate * ANALYSIS_WINDOW
-                
-                if total_events >= MIN_EVENTS and failure_rate >= 0.5:
-                    alert = AnomalyAlert(
-                        anomaly_type="CREDENTIAL_STUFFING",
-                        severity="CRITICAL",
-                        username=username,
-                        detail=f"Static threshold triggered: failure_rate={failure_rate:.3f}",
-                        evidence={
-                            "event_rate": event_rate,
-                            "failure_rate": failure_rate,
-                            "denial_rate": feats[2],
-                            "resource_diversity": feats[3],
-                            "distinct_ips": feats[4],
-                            "login_rate": feats[5],
-                            "hour": feats[6],
-                        }
-                    )
-                    alerts.append(alert)
-        else:
-            usernames = list(feature_map.keys())
-            X = np.array([feature_map[u] for u in usernames])
-
-            clf = IsolationForest(contamination=0.1, random_state=42)
-            preds = clf.fit_predict(X)
-
-            for i, username in enumerate(usernames):
-                if preds[i] == -1:
-                    feats = feature_map[username]
-                    failure_rate = feats[1]
-                    severity = "CRITICAL" if failure_rate > 0.5 else "HIGH"
-                    anomaly_type = "CREDENTIAL_STUFFING" if failure_rate > 0.5 else "SESSION_ANOMALY"
-                    alert = AnomalyAlert(
-                        anomaly_type=anomaly_type,
-                        severity=severity,
-                        username=username,
-                        detail=f"Isolation Forest anomaly: event_rate={feats[0]:.3f} failure_rate={feats[1]:.3f} denial_rate={feats[2]:.3f}",
-                        evidence={
-                            "event_rate": feats[0],
-                            "failure_rate": feats[1],
-                            "denial_rate": feats[2],
-                            "resource_diversity": feats[3],
-                            "distinct_ips": feats[4],
-                            "login_rate": feats[5],
-                            "hour": feats[6],
-                        }
-                    )
-                    alerts.append(alert)
+                severity = "CRITICAL" if failure_rate > 0.5 else "HIGH"
+                anomaly_type = "CREDENTIAL_STUFFING" if failure_rate > 0.5 else "SESSION_ANOMALY"
+                alert = AnomalyAlert(
+                    anomaly_type=anomaly_type,
+                    severity=severity,
+                    username=username,
+                    detail=f"Isolation Forest anomaly: event_rate={feats[0]:.3f} failure_rate={feats[1]:.3f} denial_rate={feats[2]:.3f}",
+                    evidence={
+                        "event_rate": feats[0],
+                        "failure_rate": feats[1],
+                        "denial_rate": feats[2],
+                        "resource_diversity": feats[3],
+                        "distinct_ips": feats[4],
+                        "login_rate": feats[5],
+                        "hour": feats[6],
+                    }
+                )
+                alerts.append(alert)
 
         if not alerts:
             log.info("No anomalies detected")
@@ -199,7 +171,6 @@ def run_analysis():
         if conn:
             conn.close()
 
-
 def main():
     log.info("TunnelForge session analyser starting")
     log.info(f"Window: {ANALYSIS_WINDOW}s | Interval: 60s | Min events: {MIN_EVENTS}")
@@ -208,7 +179,6 @@ def main():
     while True:
         schedule.run_pending()
         time.sleep(1)
-
 
 if __name__ == "__main__":
     main()
