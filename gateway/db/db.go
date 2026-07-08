@@ -176,7 +176,7 @@ func (s *Store) WriteAuditLog(ctx context.Context, userID, username, action, res
 		return nil
 	default:
 		metrics.AuditQueueDrops.Inc()
-		log.Println("CRITICAL: audit queue full, dropping log event")
+		log.Println("CRITICAL: audit queue full, dropping log event to preserve gateway performance")
 		return nil
 	}
 }
