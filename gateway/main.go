@@ -40,24 +40,23 @@ func main() {
 	authManager := auth.NewManager(cfg.JWTSecret, redis)
 	authHandler := handlers.NewAuthHandler(store, authManager, redis)
 	sessionHandler := handlers.NewSessionHandler()
-	internalHandler := handlers.NewInternalHandler(cfg.InternalSecret)
+	internalHandler := handlers.NewInternalHandler(cfg.InternalSecret, store)
 
 	resourceHandler, err := handlers.NewResourceHandler(cfg.UpstreamURL, store)
 	if err != nil {
 		log.Fatalf("failed to create resource handler: %v", err)
 	}
 
+	metricsSrv := &http.Server{
+		Addr:              ":" + cfg.MetricsPort,
+		Handler:           promhttp.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	
 	go func() {
-		mux := http.NewServeMux()
-		mux.Handle("/metrics", promhttp.Handler())
-		metricsSrv := &http.Server{
-			Addr:              ":" + cfg.MetricsPort,
-			Handler:           mux,
-			ReadHeaderTimeout: 5 * time.Second,
-			ReadTimeout:       10 * time.Second,
-			WriteTimeout:      10 * time.Second,
-			IdleTimeout:       60 * time.Second,
-		}
 		log.Printf("Metrics server starting on :%s", cfg.MetricsPort)
 		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("metrics server error: %v", err)
@@ -78,6 +77,17 @@ func main() {
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.Timeout(30 * time.Second))
+	
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "DENY")
+			w.Header().Set("X-XSS-Protection", "1; mode=block")
+			next.ServeHTTP(w, req)
+		})
+	})
+
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			start := time.Now()
@@ -98,6 +108,7 @@ func main() {
 
 	r.Post("/auth/login", authHandler.Login)
 	r.Post("/internal/anomaly", internalHandler.RecordAnomaly)
+	r.Post("/internal/bootstrap", internalHandler.BootstrapAdmin)
 
 	r.Group(func(r chi.Router) {
 		r.Use(authManager.Middleware)
@@ -130,8 +141,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	if err := metricsSrv.Shutdown(ctx); err != nil {
+		log.Printf("Metrics server forced to shutdown: %v", err)
+	}
+
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		log.Fatalf("Gateway server forced to shutdown: %v", err)
 	}
 
 	log.Println("Server exiting successfully")
