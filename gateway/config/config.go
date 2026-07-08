@@ -17,13 +17,13 @@ type Config struct {
 
 func Load() *Config {
 	jwtSecret := getEnv("JWT_SECRET", "")
-	if len(jwtSecret) < 32 {
-		log.Fatal("FATAL: JWT_SECRET environment variable is missing or less than 32 characters. Refusing to start.")
+	if jwtSecret == "" || jwtSecret == "changeme-32-char-secret-here!!!" {
+		log.Fatal("FATAL: JWT_SECRET must be explicitly set to a secure string in the environment")
 	}
 
 	internalSecret := getEnv("INTERNAL_SECRET", "")
-	if len(internalSecret) < 32 {
-		log.Fatal("FATAL: INTERNAL_SECRET environment variable is missing or less than 32 characters. Refusing to start.")
+	if internalSecret == "" || internalSecret == "super-secret-sidecar-key" {
+		log.Fatal("FATAL: INTERNAL_SECRET must be explicitly set to a secure string in the environment")
 	}
 
 	return &Config{
@@ -32,7 +32,7 @@ func Load() *Config {
 		PostgresDSN:    "postgres://" + getEnv("POSTGRES_USER", "tunnelforge") + ":" + getEnv("POSTGRES_PASSWORD", "changeme") + "@" + getEnv("POSTGRES_HOST", "postgres") + ":" + getEnv("POSTGRES_PORT", "5432") + "/" + getEnv("POSTGRES_DB", "tunnelforge") + "?sslmode=disable",
 		RedisAddr:      getEnv("REDIS_ADDR", "redis:6379"),
 		JWTSecret:      jwtSecret,
-		UpstreamURL:    "http://client-sim:9000",
+		UpstreamURL:    getEnv("UPSTREAM_URL", "http://client-sim:9000"),
 		InternalSecret: internalSecret,
 	}
 }
