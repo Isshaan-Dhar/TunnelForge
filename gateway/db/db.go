@@ -85,13 +85,20 @@ func (s *Store) auditWorker() {
 	defer s.wg.Done()
 	
 	for event := range s.auditQueue {
-		_, err := s.pool.Exec(context.Background(),
-			`INSERT INTO audit_log (user_id, username, action, resource, client_ip, status, detail)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-			nullableUUID(event.UserID), event.Username, event.Action, event.Resource, event.ClientIP, event.Status, event.Detail,
-		)
+		var err error
+		for attempts := 0; attempts < 3; attempts++ {
+			_, err = s.pool.Exec(context.Background(),
+				`INSERT INTO audit_log (user_id, username, action, resource, client_ip, status, detail)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+				nullableUUID(event.UserID), event.Username, event.Action, event.Resource, event.ClientIP, event.Status, event.Detail,
+			)
+			if err == nil {
+				break
+			}
+			time.Sleep(time.Duration(attempts+1) * 200 * time.Millisecond)
+		}
 		if err != nil {
-			log.Printf("failed to write audit log: %v", err)
+			log.Printf("failed to write audit log after 3 attempts: %v", err)
 		}
 	}
 }
